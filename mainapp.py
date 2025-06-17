@@ -72,4 +72,3 @@ if captured_image:
             st.warning("No hairstyle recommendations found for this face shape.")
     else:
         st.error("Couldn't detect a face in the photo. Please try again.")
-
