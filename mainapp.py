@@ -1,42 +1,75 @@
 import streamlit as st
+import cv2
+import numpy as np
+import mediapipe as mp
 import json
 from PIL import Image
-from detect_face_shape import detect_face_shape
-import os
 
-# Load recommendations
-def load_recommendations():
-    with open("hairstyles.json", "r") as file:
-        return json.load(file)
+def detect_face_shape(image):
+    mp_face_mesh = mp.solutions.face_mesh
+    face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True)
+    img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(img_rgb)
 
-st.set_page_config(page_title="Face Shape Hairstyle Recommender", layout="centered")
-st.title("📸 AI Hairstyle Recommender")
-st.markdown("Take a selfie and let the app detect your face shape to recommend styles!")
+    if not results.multi_face_landmarks:
+        return None
 
-# Upload or capture
-img_file = st.camera_input("Take a selfie")
+    landmarks = results.multi_face_landmarks[0].landmark
 
-if img_file is not None:
-    image = Image.open(img_file)
-    st.image(image, caption="Uploaded Image", use_column_width=True)
+    forehead = np.array([landmarks[10].x, landmarks[10].y])
+    chin = np.array([landmarks[152].x, landmarks[152].y])
+    left_cheek = np.array([landmarks[234].x, landmarks[234].y])
+    right_cheek = np.array([landmarks[454].x, landmarks[454].y])
+    jaw_left = np.array([landmarks[127].x, landmarks[127].y])
+    jaw_right = np.array([landmarks[356].x, landmarks[356].y])
 
-    with st.spinner("Detecting face shape..."):
-        face_shape = detect_face_shape(image)
-    
-    if face_shape == "unknown":
-        st.error("Face not detected. Try a clearer photo.")
-    else:
-        st.success(f"Detected Face Shape: **{face_shape.capitalize()}**")
-        data = load_recommendations()
-        styles = data.get(face_shape, [])
+    face_height = np.linalg.norm(forehead - chin)
+    face_width = np.linalg.norm(left_cheek - right_cheek)
+    jaw_width = np.linalg.norm(jaw_left - jaw_right)
 
-        if not styles:
-            st.warning("No hairstyle recommendations found.")
+    ratio = face_height / face_width
+
+    if ratio < 1.1:
+        if jaw_width > face_width * 0.95:
+            return "square"
         else:
-            for style in styles:
-                image_path = style["image"]
-                if os.path.exists(image_path):
-                    style_img = Image.open(image_path)
-                    st.image(style_img, caption=style["name"], use_column_width=True)
-                else:
-                    st.warning(f"Image not found: {style['image']}")
+            return "round"
+    elif ratio > 1.5:
+        return "oblong"
+    elif jaw_width < face_width * 0.85:
+        return "heart"
+    elif jaw_width > face_width * 0.9:
+        return "oval"
+    else:
+        return "diamond"
+
+# ------------------- Streamlit UI -------------------
+st.set_page_config(page_title="Hairstyle Recommender", layout="centered")
+st.title("📸 Hairstyle Recommender Using Webcam")
+
+captured_image = st.camera_input("Take a clear front-facing photo")
+
+if captured_image:
+    # Convert to OpenCV image
+    img = Image.open(captured_image)
+    img = np.array(img)
+    image = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    st.image(image, caption="Captured Photo", use_column_width=True)
+
+    detected_shape = detect_face_shape(image)
+
+    if detected_shape:
+        st.success(f"Detected Face Shape: **{detected_shape.capitalize()}**")
+
+        hairstyles = json.load(open("hairstyles.json"))
+
+        if detected_shape in hairstyles:
+            st.subheader(f"Recommended Hairstyles for {detected_shape.capitalize()} Face:")
+            for style in hairstyles[detected_shape]:
+                st.markdown(f"- {style}")
+        else:
+            st.warning("No hairstyle recommendations found for this face shape.")
+    else:
+        st.error("Couldn't detect a face in the photo. Please try again.")
+
